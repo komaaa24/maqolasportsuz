@@ -108,6 +108,11 @@ export function startPaymeMerchantApi({ bot, notifyAdmin }) {
 
   const server = app.listen(config.server.port, () => {
     console.log(`Payme Merchant API listening on ${config.server.paymePath} port ${config.server.port}`);
+    void logPayme('payme_server_started', {
+      path: config.server.paymePath,
+      port: config.server.port,
+      mode: config.payme.mode,
+    });
   });
 
   server.on('error', (error) => {
