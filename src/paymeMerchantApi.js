@@ -5,6 +5,7 @@ import {
   getSubmission,
   updateSubmission,
 } from './storage.js';
+import { logPayme } from './logger.js';
 
 const errors = {
   invalidAmount: (id) => rpcError(id, -31001, 'Invalid amount', 'amount'),
@@ -22,6 +23,12 @@ export function startPaymeMerchantApi({ bot, notifyAdmin }) {
   app.use(express.json({ type: '*/*' }));
 
   app.get(config.server.paymePath, (req, res) => {
+    void logPayme('payme_health_check', {
+      ip: req.ip,
+      path: req.path,
+      userAgent: req.headers['user-agent'],
+    });
+
     res.json({
       ok: true,
       service: 'maqola-payme-merchant-api',
@@ -32,39 +39,71 @@ export function startPaymeMerchantApi({ bot, notifyAdmin }) {
 
   app.post(config.server.paymePath, async (req, res) => {
     const requestId = req.body?.id ?? null;
-
-    console.log('payme_merchant_api_request', {
+    const requestLog = {
+      ip: req.ip,
       method: req.body?.method,
       requestId,
       account: req.body?.params?.account,
       amount: req.body?.params?.amount,
-    });
+      hasAuthorization: Boolean(req.headers.authorization),
+      userAgent: req.headers['user-agent'],
+    };
+
+    await logPayme('payme_request', requestLog);
 
     if (!isAuthorized(req.headers.authorization)) {
-      console.warn('payme_merchant_api_unauthorized', {
-        requestId,
-        method: req.body?.method,
+      const errorResponse = errors.unauthorized(requestId);
+      await logPayme('payme_unauthorized', {
+        ...requestLog,
+        response: errorResponse,
       });
-      res.json(errors.unauthorized(requestId));
+      res.json(errorResponse);
       return;
     }
 
     try {
       const result = await handlePaymeRequest(req.body, { bot, notifyAdmin });
-      res.json({ result, id: requestId });
+      const response = { result, id: requestId };
+      await logPayme('payme_response', {
+        method: req.body?.method,
+        requestId,
+        response,
+      });
+      res.json(response);
     } catch (error) {
       if (error?.rpcError) {
+        await logPayme('payme_rpc_error', {
+          method: req.body?.method,
+          requestId,
+          response: error.rpcError,
+        });
         res.json(error.rpcError);
         return;
       }
 
-      console.error('payme_merchant_api_failed', error);
-      res.json(errors.system(requestId));
+      const errorResponse = errors.system(requestId);
+      await logPayme('payme_system_error', {
+        method: req.body?.method,
+        requestId,
+        error: {
+          name: error.name,
+          message: error.message,
+          stack: error.stack,
+        },
+        response: errorResponse,
+      });
+      res.json(errorResponse);
     }
   });
 
   app.use(config.server.paymePath, (req, res) => {
-    res.json(rpcError(null, -32300, 'Method must be POST'));
+    const response = rpcError(null, -32300, 'Method must be POST');
+    void logPayme('payme_invalid_http_method', {
+      method: req.method,
+      path: req.path,
+      response,
+    });
+    res.json(response);
   });
 
   const server = app.listen(config.server.port, () => {

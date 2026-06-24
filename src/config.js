@@ -67,6 +67,7 @@ export const config = {
   submissionPriceUzs: priceUzs,
   submissionAmountTiyin: Math.round(priceUzs * 100),
   dataDir: path.resolve(process.env.DATA_DIR ?? './data'),
+  logDir: path.resolve(process.env.LOG_DIR ?? './logs'),
   maxFileSizeBytes: Math.round(maxFileSizeMb * 1024 * 1024),
 };
 
