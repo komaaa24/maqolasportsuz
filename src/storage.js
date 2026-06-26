@@ -1,96 +1,77 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config } from './config.js';
+import { AppDataSource } from './dataSource.js';
 
-const dbPath = path.join(config.dataDir, 'db.json');
-const filesDir = path.join(config.dataDir, 'submissions');
+const filesDir = path.join(config.uploadDir, 'submissions');
 
-const initialDb = {
-  submissions: {},
-  userDrafts: {},
-};
-
-let db = structuredClone(initialDb);
-let writeQueue = Promise.resolve();
+let submissionRepository;
+let draftRepository;
 
 export async function initStorage() {
   await fs.mkdir(filesDir, { recursive: true });
 
-  try {
-    const raw = await fs.readFile(dbPath, 'utf8');
-    db = { ...structuredClone(initialDb), ...JSON.parse(raw) };
-    db.submissions ??= {};
-    db.userDrafts ??= {};
-  } catch (error) {
-    if (error.code !== 'ENOENT') {
-      throw error;
-    }
-    await persist();
+  if (!AppDataSource.isInitialized) {
+    await AppDataSource.initialize();
   }
+
+  submissionRepository = AppDataSource.getRepository('Submission');
+  draftRepository = AppDataSource.getRepository('UserDraft');
 }
 
 export function getFilesDir() {
   return filesDir;
 }
 
-export function getSubmission(id) {
-  return db.submissions[id] ?? null;
+export async function getSubmission(id) {
+  return submissionRepository.findOneBy({ id });
 }
 
-export function findSubmissionByPaymeTransactionId(paymeTransactionId) {
-  return Object.values(db.submissions).find((submission) => {
-    return submission.payment?.transaction?.paymeId === paymeTransactionId;
-  }) ?? null;
+export async function getUserDraft(userId) {
+  const row = await draftRepository.findOneBy({ userId: String(userId) });
+  return row?.draft ?? null;
 }
 
-export function getUserDraft(userId) {
-  return db.userDrafts[String(userId)] ?? null;
-}
-
-export function listUserSubmissions(userId) {
-  return Object.values(db.submissions)
-    .filter((submission) => submission.user.id === userId)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+export async function listUserSubmissions(userId) {
+  return submissionRepository
+    .createQueryBuilder('submission')
+    .where("submission.user ->> 'id' = :userId", { userId: String(userId) })
+    .orderBy('submission.createdAt', 'DESC')
+    .getMany();
 }
 
 export async function saveUserDraft(userId, draft) {
-  db.userDrafts[String(userId)] = draft;
-  await persist();
+  await draftRepository.save({
+    userId: String(userId),
+    draft,
+  });
 }
 
 export async function clearUserDraft(userId) {
-  delete db.userDrafts[String(userId)];
-  await persist();
+  await draftRepository.delete({ userId: String(userId) });
 }
 
 export async function createSubmission(submission) {
-  db.submissions[submission.id] = submission;
-  await persist();
-  return submission;
+  return submissionRepository.save(submission);
 }
 
 export async function updateSubmission(id, patch) {
-  const current = getSubmission(id);
+  const current = await getSubmission(id);
   if (!current) {
     throw new Error(`Submission not found: ${id}`);
   }
 
-  db.submissions[id] = {
+  const updated = {
     ...current,
     ...patch,
-    updatedAt: new Date().toISOString(),
   };
-  await persist();
-  return db.submissions[id];
+
+  await submissionRepository.save(updated);
+  return getSubmission(id);
 }
 
-async function persist() {
-  writeQueue = writeQueue.then(async () => {
-    await fs.mkdir(config.dataDir, { recursive: true });
-    const tmpPath = `${dbPath}.tmp`;
-    await fs.writeFile(tmpPath, JSON.stringify(db, null, 2));
-    await fs.rename(tmpPath, dbPath);
-  });
-
-  return writeQueue;
+export async function closeStorage() {
+  if (AppDataSource.isInitialized) {
+    await AppDataSource.destroy();
+  }
 }

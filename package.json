@@ -1,7 +1,7 @@
 {
   "name": "maqola-payme-bot",
   "version": "1.0.0",
-  "description": "Telegram bot for article submissions with Payme checkout payments.",
+  "description": "Telegram bot for article submissions with Payme Subscribe API hold payments.",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
@@ -14,7 +14,9 @@
   },
   "dependencies": {
     "dotenv": "^16.4.7",
-    "express": "^4.19.2",
-    "grammy": "^1.44.0"
+    "grammy": "^1.44.0",
+    "pg": "^8.22.0",
+    "reflect-metadata": "^0.2.2",
+    "typeorm": "^0.3.27"
   }
 }
