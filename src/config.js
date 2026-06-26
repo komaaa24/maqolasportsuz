@@ -25,6 +25,11 @@ if (!Number.isFinite(maxFileSizeMb) || maxFileSizeMb <= 0) {
   throw new Error('MAX_FILE_SIZE_MB must be a positive number');
 }
 
+const webAppPort = Number(process.env.WEB_APP_PORT ?? 3000);
+if (!Number.isInteger(webAppPort) || webAppPort <= 0 || webAppPort > 65535) {
+  throw new Error('WEB_APP_PORT must be a valid TCP port');
+}
+
 const databaseUrl = firstNonEmpty(process.env.DATABASE_URL, null);
 if (!databaseUrl) {
   throw new Error('Missing DATABASE_URL for PostgreSQL storage');
@@ -70,8 +75,26 @@ export const config = {
   databaseUrl,
   uploadDir: path.resolve(process.env.UPLOAD_DIR ?? './uploads'),
   maxFileSizeBytes: Math.round(maxFileSizeMb * 1024 * 1024),
+  webApp: {
+    baseUrl: normalizeBaseUrl(firstNonEmpty(process.env.WEB_APP_BASE_URL, null)),
+    path: normalizePath(process.env.WEB_APP_PATH ?? '/pay/card'),
+    port: webAppPort,
+  },
 };
 
 function firstNonEmpty(...values) {
   return values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
+}
+
+function normalizeBaseUrl(value) {
+  if (!value) {
+    return null;
+  }
+
+  return String(value).replace(/\/+$/, '');
+}
+
+function normalizePath(value) {
+  const normalized = String(value || '/pay/card').trim();
+  return normalized.startsWith('/') ? normalized : `/${normalized}`;
 }

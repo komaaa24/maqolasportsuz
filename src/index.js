@@ -5,6 +5,7 @@ import { Bot, InlineKeyboard, InputFile } from 'grammy';
 import { config } from './config.js';
 import { messages, formatUzs } from './messages.js';
 import { PaymeSubscribeClient } from './paymeSubscribeClient.js';
+import { createPaymentWebAppUrl, startPaymentWebAppServer } from './paymentWebApp.js';
 import {
   clearUserDraft,
   closeStorage,
@@ -17,9 +18,10 @@ import {
   saveUserDraft,
   updateSubmission,
 } from './storage.js';
-import { getExtension, isAllowedDocument, parseCardInput, parseOtp } from './validators.js';
+import { getExtension, isAllowedDocument } from './validators.js';
 
 const bot = new Bot(config.botToken);
+let paymentWebAppServer;
 const payme = new PaymeSubscribeClient({
   endpoint: config.payme.subscribeApiUrl,
   merchantId: config.payme.merchantId,
@@ -104,7 +106,14 @@ bot.on('message:document', async (ctx) => {
       submissionId: submission.id,
     });
 
-    await ctx.reply(messages.askCard);
+    const paymentUrl = createPaymentWebAppUrl(submission.id);
+    if (!paymentUrl) {
+      await ctx.reply(messages.paymentWebAppNotConfigured);
+      return;
+    }
+
+    const keyboard = new InlineKeyboard().webApp('Karta maʼlumotlarini kiritish', paymentUrl);
+    await ctx.reply(messages.openPaymentWebApp, { reply_markup: keyboard });
   } catch (error) {
     console.error('document_handling_failed', error);
     await ctx.reply('Faylni qabul qilishda xatolik yuz berdi. Qayta yuborib ko‘ring.');
@@ -120,12 +129,19 @@ bot.on('message:text', async (ctx) => {
   }
 
   if (draft.step === 'card') {
-    await handleCardInput(ctx, draft);
+    const paymentUrl = createPaymentWebAppUrl(draft.submissionId);
+    if (!paymentUrl) {
+      await ctx.reply(messages.paymentWebAppNotConfigured);
+      return;
+    }
+
+    const keyboard = new InlineKeyboard().webApp('Karta maʼlumotlarini kiritish', paymentUrl);
+    await ctx.reply(messages.openPaymentWebAppAgain, { reply_markup: keyboard });
     return;
   }
 
   if (draft.step === 'otp') {
-    await handleOtpInput(ctx, draft);
+    await ctx.reply(messages.finishPaymentInWebApp);
     return;
   }
 
@@ -141,114 +157,6 @@ bot.callbackQuery(/^reject:(.+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   await handleAdminDecision(ctx, ctx.match[1], 'reject');
 });
-
-async function handleCardInput(ctx, draft) {
-  const card = parseCardInput(ctx.message.text);
-  if (!card) {
-    await ctx.reply(messages.invalidCard);
-    return;
-  }
-
-  const submission = await getSubmission(draft.submissionId);
-  if (!submission || submission.status !== 'awaiting_card') {
-    await clearUserDraft(ctx.from.id);
-    await ctx.reply('Buyurtma topilmadi yoki allaqachon qayta ishlangan.');
-    return;
-  }
-
-  try {
-    const cardResult = await payme.createCard(card);
-    const verifyResult = await payme.sendVerifyCode(cardResult.card.token);
-
-    if (!verifyResult.sent) {
-      throw new Error('Payme did not send verification code');
-    }
-
-    await updateSubmission(submission.id, {
-      status: 'awaiting_otp',
-      payment: {
-        ...submission.payment,
-        cardToken: cardResult.card.token,
-        cardMask: cardResult.card.number,
-        cardExpire: cardResult.card.expire,
-      },
-    });
-
-    await saveUserDraft(ctx.from.id, {
-      step: 'otp',
-      submissionId: submission.id,
-    });
-
-    await ctx.reply(messages.askOtp(verifyResult.phone, verifyResult.wait));
-  } catch (error) {
-    console.error('card_verification_start_failed', error);
-    await ctx.reply(messages.paymentError);
-  }
-}
-
-async function handleOtpInput(ctx, draft) {
-  const code = parseOtp(ctx.message.text);
-  if (!code) {
-    await ctx.reply(messages.invalidOtp);
-    return;
-  }
-
-  const submission = await getSubmission(draft.submissionId);
-  if (!submission || submission.status !== 'awaiting_otp') {
-    await clearUserDraft(ctx.from.id);
-    await ctx.reply('Buyurtma topilmadi yoki allaqachon qayta ishlangan.');
-    return;
-  }
-
-  try {
-    const verified = await payme.verifyCard({
-      token: submission.payment.cardToken,
-      code,
-    });
-
-    const created = await payme.createHoldReceipt({
-      submissionId: submission.id,
-      userId: submission.user.id,
-      planId: config.payme.planId,
-      amountTiyin: submission.payment.amountTiyin,
-    });
-
-    const receiptId = created.receipt._id;
-    const paid = await payme.payHoldReceipt({
-      receiptId,
-      token: verified.card.token,
-    });
-
-    const receipt = paid.receipt;
-    if (receipt.state !== 5) {
-      throw new Error(`Unexpected Payme hold state: ${receipt.state}`);
-    }
-
-    const updated = await updateSubmission(submission.id, {
-      status: 'pending_review',
-      payment: {
-        ...submission.payment,
-        cardToken: null,
-        cardMask: verified.card.number,
-        cardExpire: verified.card.expire,
-        receiptId,
-        receiptState: receipt.state,
-        account: {
-          user_id: String(submission.user.id),
-          plan_id: String(config.payme.planId),
-        },
-        heldAt: new Date().toISOString(),
-      },
-    });
-
-    await clearUserDraft(ctx.from.id);
-    await notifyAdmin(updated);
-    await ctx.reply(messages.paymentHeld);
-  } catch (error) {
-    console.error('hold_payment_failed', error);
-    await ctx.reply(messages.paymentError);
-  }
-}
 
 async function notifyAdmin(submission) {
   const userName = formatUser(submission.user);
@@ -421,6 +329,7 @@ async function clearAdminKeyboard(ctx) {
 }
 
 await initStorage();
+paymentWebAppServer = startPaymentWebAppServer({ payme, notifyAdmin });
 
 bot.catch((error) => {
   console.error('bot_error', {
@@ -436,6 +345,7 @@ await bot.start();
 console.log('Maqola Payme bot started');
 
 async function shutdown(signal) {
+  paymentWebAppServer?.close();
   await closeStorage();
   bot.stop(signal);
 }
