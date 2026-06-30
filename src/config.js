@@ -25,6 +25,8 @@ if (!Number.isFinite(maxFileSizeMb) || maxFileSizeMb <= 0) {
   throw new Error('MAX_FILE_SIZE_MB must be a positive number');
 }
 
+const webAppUrl = normalizeFullUrl(firstNonEmpty(process.env.WEB_APP_URL, null));
+const webAppApiUrl = normalizeFullUrl(firstNonEmpty(process.env.WEB_APP_API_URL, null));
 const webAppPort = Number(process.env.WEB_APP_PORT ?? 3000);
 if (!Number.isInteger(webAppPort) || webAppPort <= 0 || webAppPort > 65535) {
   throw new Error('WEB_APP_PORT must be a valid TCP port');
@@ -76,8 +78,11 @@ export const config = {
   uploadDir: path.resolve(process.env.UPLOAD_DIR ?? './uploads'),
   maxFileSizeBytes: Math.round(maxFileSizeMb * 1024 * 1024),
   webApp: {
+    url: webAppUrl,
     baseUrl: normalizeBaseUrl(firstNonEmpty(process.env.WEB_APP_BASE_URL, null)),
-    path: normalizePath(process.env.WEB_APP_PATH ?? '/pay/card'),
+    path: normalizePath(process.env.WEB_APP_PATH ?? getPathFromUrl(webAppUrl) ?? '/pay/card'),
+    apiUrl: webAppApiUrl,
+    apiPath: normalizePath(process.env.WEB_APP_API_PATH ?? getPathFromUrl(webAppApiUrl) ?? '/api/webapp/payment/confirm'),
     port: webAppPort,
   },
 };
@@ -97,4 +102,25 @@ function normalizeBaseUrl(value) {
 function normalizePath(value) {
   const normalized = String(value || '/pay/card').trim();
   return normalized.startsWith('/') ? normalized : `/${normalized}`;
+}
+
+function normalizeFullUrl(value) {
+  if (!value) {
+    return null;
+  }
+
+  const url = new URL(String(value).trim());
+  if (url.protocol !== 'https:') {
+    throw new Error(`${url.toString()} must use HTTPS`);
+  }
+
+  return url.toString().replace(/[?&]$/, '');
+}
+
+function getPathFromUrl(value) {
+  if (!value) {
+    return null;
+  }
+
+  return new URL(value).pathname;
 }

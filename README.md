@@ -55,12 +55,19 @@ UPLOAD_DIR=./uploads
 Telegram ichida karta formasi ochilishi uchun public HTTPS URL kerak:
 
 ```env
-WEB_APP_BASE_URL=https://your-domain.uz
-WEB_APP_PATH=/pay/card
-WEB_APP_PORT=3000
+WEB_APP_URL=https://programmsoft.uz/sports_web.php
+WEB_APP_API_URL=https://programmsoft.uz/sports_pay.php
+WEB_APP_PORT=9001
 ```
 
-`WEB_APP_BASE_URL` Telegram ochadigan tashqi HTTPS manzil bo'lishi kerak. Odatda Nginx `https://your-domain.uz/pay/card` so'rovlarini bot ishlayotgan serverdagi `localhost:3000` ga proxy qiladi.
+`WEB_APP_URL` Telegram ochadigan tashqi HTTPS sahifa. `WEB_APP_API_URL` Web App to'lovni yakunlash uchun POST qiladigan tashqi HTTPS endpoint.
+
+Apache/PHP ishlatilsa, [deploy/sports_web.php](deploy/sports_web.php) va [deploy/sports_pay.php](deploy/sports_pay.php) fayllarini sayt rootiga joylashtiring. Bu PHP fayllar tashqi HTTPS so'rovlarni ichkaridagi Node Web App serverga uzatadi:
+
+```text
+https://programmsoft.uz/sports_web.php -> http://127.0.0.1:9001/sports_web.php
+https://programmsoft.uz/sports_pay.php -> http://127.0.0.1:9001/sports_pay.php
+```
 
 ## Muhim Payme eslatmalari
 

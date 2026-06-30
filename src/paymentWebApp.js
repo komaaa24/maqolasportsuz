@@ -11,11 +11,14 @@ import { validateTelegramWebAppInitData } from './telegramWebAppAuth.js';
 const jsonLimitBytes = 20 * 1024;
 
 export function createPaymentWebAppUrl(submissionId) {
-  if (!config.webApp.baseUrl) {
+  if (!config.webApp.url && !config.webApp.baseUrl) {
     return null;
   }
 
-  const url = new URL(config.webApp.path, config.webApp.baseUrl);
+  const url = config.webApp.url
+    ? new URL(config.webApp.url)
+    : new URL(config.webApp.path, config.webApp.baseUrl);
+
   url.searchParams.set('submission_id', submissionId);
   return url.toString();
 }
@@ -50,7 +53,7 @@ async function routeRequest({ request, response, payme, notifyAdmin }) {
     return;
   }
 
-  if (request.method === 'POST' && url.pathname === '/api/webapp/payment/confirm') {
+  if (request.method === 'POST' && url.pathname === config.webApp.apiPath) {
     await confirmHoldPayment({ request, response, payme, notifyAdmin });
     return;
   }
@@ -209,6 +212,7 @@ function sendHtml(response, html) {
 function renderPaymentPage() {
   const paymeEndpoint = JSON.stringify(config.payme.subscribeApiUrl);
   const merchantId = JSON.stringify(config.payme.merchantId);
+  const webAppApiUrl = JSON.stringify(config.webApp.apiUrl ?? config.webApp.apiPath);
 
   return `<!doctype html>
 <html lang="uz">
@@ -385,6 +389,7 @@ function renderPaymentPage() {
   <script>
     const PAYME_ENDPOINT = ${paymeEndpoint};
     const PAYME_MERCHANT_ID = ${merchantId};
+    const WEB_APP_API_URL = ${webAppApiUrl};
     const tg = window.Telegram?.WebApp;
     const params = new URLSearchParams(window.location.search);
     const submissionId = params.get('submission_id');
@@ -470,7 +475,7 @@ function renderPaymentPage() {
           code: otp.value,
         });
 
-        const result = await postJson('/api/webapp/payment/confirm', {
+        const result = await postJson(WEB_APP_API_URL, {
           initData: tg.initData,
           submissionId,
           cardToken: verified.card.token,

@@ -18,7 +18,7 @@ export const messages = {
   ].join('\n'),
   openPaymentWebAppAgain: 'Toʻlovni yakunlash uchun quyidagi tugmani bosing.',
   finishPaymentInWebApp: 'SMS kodni toʻlov oynasida kiriting. Kerak bo‘lsa toʻlov tugmasini qayta oching.',
-  paymentWebAppNotConfigured: 'Toʻlov oynasi serverda sozlanmagan. Administrator WEB_APP_BASE_URL ni .env ga yozishi kerak.',
+  paymentWebAppNotConfigured: 'Toʻlov oynasi serverda sozlanmagan. Administrator WEB_APP_URL ni .env ga yozishi kerak.',
   invalidCard: 'Karta maʼlumoti notoʻgʻri. Format: 8600123412341234 03/29',
   askOtp: (phone, wait) => {
     const seconds = wait ? Math.ceil(wait / 1000) : null;
