@@ -80,9 +80,9 @@ export const config = {
   webApp: {
     url: webAppUrl,
     baseUrl: normalizeBaseUrl(firstNonEmpty(process.env.WEB_APP_BASE_URL, null)),
-    path: normalizePath(process.env.WEB_APP_PATH ?? getPathFromUrl(webAppUrl) ?? '/pay/card'),
+    path: normalizePath(getPathFromUrl(webAppUrl) ?? process.env.WEB_APP_PATH ?? '/pay/card'),
     apiUrl: webAppApiUrl,
-    apiPath: normalizePath(process.env.WEB_APP_API_PATH ?? getPathFromUrl(webAppApiUrl) ?? '/api/webapp/payment/confirm'),
+    apiPath: normalizePath(getPathFromUrl(webAppApiUrl) ?? process.env.WEB_APP_API_PATH ?? '/api/webapp/payment/confirm'),
     port: webAppPort,
   },
 };
