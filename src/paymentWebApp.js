@@ -7,6 +7,7 @@ import {
   updateSubmission,
 } from './storage.js';
 import { validateTelegramWebAppInitData } from './telegramWebAppAuth.js';
+import { parseCardInput, parseOtp } from './validators.js';
 
 const jsonLimitBytes = 20 * 1024;
 
@@ -60,7 +61,7 @@ async function routeRequest({ request, response, payme, notifyAdmin }) {
   }
 
   if (request.method === 'POST' && isPaymentConfirmPath(url.pathname)) {
-    await confirmHoldPayment({ request, response, payme, notifyAdmin });
+    await handlePaymentPost({ request, response, payme, notifyAdmin });
     return;
   }
 
@@ -75,8 +76,18 @@ function isPaymentConfirmPath(pathname) {
   return pathname === config.webApp.apiPath || pathname === '/api/webapp/payment/confirm';
 }
 
-async function confirmHoldPayment({ request, response, payme, notifyAdmin }) {
+async function handlePaymentPost({ request, response, payme, notifyAdmin }) {
   const body = await readJsonBody(request);
+
+  if (body.action === 'start') {
+    await startCardVerification({ body, response, payme });
+    return;
+  }
+
+  await confirmHoldPayment({ body, response, payme, notifyAdmin });
+}
+
+async function startCardVerification({ body, response, payme }) {
   const auth = authenticateWebApp(body.initData);
   if (!auth) {
     sendJson(response, 401, { ok: false, error: 'UNAUTHORIZED', message: 'Telegram sessiya tasdiqlanmadi.' });
@@ -85,17 +96,75 @@ async function confirmHoldPayment({ request, response, payme, notifyAdmin }) {
 
   const submission = await getOwnedSubmission(body.submissionId, auth.user.id, 'awaiting_card');
   if (!submission) {
-    sendJson(response, 404, { ok: false, error: 'SUBMISSION_NOT_FOUND', message: 'Buyurtma topilmadi yoki allaqachon qayta ishlangan.' });
+    sendJson(response, 404, { ok: false, error: 'SUBMISSION_NOT_FOUND', message: 'Buyurtma topilmadi yoki toʻlov boshlangan.' });
     return;
   }
 
-  const cardToken = typeof body.cardToken === 'string' ? body.cardToken.trim() : '';
-  if (!cardToken) {
-    sendJson(response, 400, { ok: false, error: 'INVALID_CARD_TOKEN', message: 'Karta tokeni topilmadi. Toʻlovni qayta boshlang.' });
+  const card = parseCardInput(`${body.cardNumber ?? ''} ${body.cardExpire ?? ''}`);
+  if (!card) {
+    sendJson(response, 400, { ok: false, error: 'INVALID_CARD', message: messages.invalidCard });
     return;
   }
 
   try {
+    const cardResult = await payme.createCard(card);
+    const verifyResult = await payme.sendVerifyCode(cardResult.card.token);
+
+    if (!verifyResult.sent) {
+      throw new Error('Payme did not send verification code');
+    }
+
+    await updateSubmission(submission.id, {
+      status: 'awaiting_otp',
+      payment: {
+        ...submission.payment,
+        cardToken: cardResult.card.token,
+        cardMask: cardResult.card.number,
+        cardExpire: cardResult.card.expire,
+      },
+    });
+
+    sendJson(response, 200, {
+      ok: true,
+      phone: verifyResult.phone ?? null,
+      wait: verifyResult.wait ?? null,
+      cardMask: cardResult.card.number ?? null,
+    });
+  } catch (error) {
+    console.error('web_app_card_verification_start_failed', error);
+    sendJson(response, 502, {
+      ok: false,
+      error: 'PAYME_CARD_ERROR',
+      message: getPaymeErrorMessage(error),
+    });
+  }
+}
+
+async function confirmHoldPayment({ body, response, payme, notifyAdmin }) {
+  const auth = authenticateWebApp(body.initData);
+  if (!auth) {
+    sendJson(response, 401, { ok: false, error: 'UNAUTHORIZED', message: 'Telegram sessiya tasdiqlanmadi.' });
+    return;
+  }
+
+  const submission = await getOwnedSubmission(body.submissionId, auth.user.id, 'awaiting_otp');
+  if (!submission) {
+    sendJson(response, 404, { ok: false, error: 'SUBMISSION_NOT_FOUND', message: 'Buyurtma topilmadi yoki allaqachon qayta ishlangan.' });
+    return;
+  }
+
+  const code = parseOtp(String(body.otp ?? ''));
+  if (!code) {
+    sendJson(response, 400, { ok: false, error: 'INVALID_OTP', message: messages.invalidOtp });
+    return;
+  }
+
+  try {
+    const verified = await payme.verifyCard({
+      token: submission.payment.cardToken,
+      code,
+    });
+
     const created = await payme.createHoldReceipt({
       submissionId: submission.id,
       userId: submission.user.id,
@@ -106,7 +175,7 @@ async function confirmHoldPayment({ request, response, payme, notifyAdmin }) {
     const receiptId = created.receipt._id;
     const paid = await payme.payHoldReceipt({
       receiptId,
-      token: cardToken,
+      token: verified.card.token,
     });
 
     const receipt = paid.receipt;
@@ -119,8 +188,8 @@ async function confirmHoldPayment({ request, response, payme, notifyAdmin }) {
       payment: {
         ...submission.payment,
         cardToken: null,
-        cardMask: normalizeNullableString(body.cardMask),
-        cardExpire: normalizeNullableString(body.cardExpire),
+        cardMask: verified.card.number,
+        cardExpire: verified.card.expire,
         receiptId,
         receiptState: receipt.state,
         account: {
@@ -224,8 +293,6 @@ function sendHtml(response, html) {
 }
 
 function renderPaymentPage() {
-  const paymeEndpoint = JSON.stringify(config.payme.subscribeApiUrl);
-  const merchantId = JSON.stringify(config.payme.merchantId);
   const webAppApiUrl = JSON.stringify(config.webApp.apiUrl ?? config.webApp.apiPath);
 
   return `<!doctype html>
@@ -401,8 +468,6 @@ function renderPaymentPage() {
   </main>
 
   <script>
-    const PAYME_ENDPOINT = ${paymeEndpoint};
-    const PAYME_MERCHANT_ID = ${merchantId};
     const WEB_APP_API_URL = ${webAppApiUrl};
     const tg = window.Telegram?.WebApp;
     const params = new URLSearchParams(window.location.search);
@@ -455,24 +520,21 @@ function renderPaymentPage() {
         const card = parseCard();
         if (!card) throw new Error('Karta maʼlumoti notoʻgʻri. Format: 8600123412341234 03/29');
 
-        const created = await paymeRpc('cards.create', {
-          card,
-          save: false,
+        const result = await postJson(WEB_APP_API_URL, {
+          action: 'start',
+          initData: tg.initData,
+          submissionId,
+          cardNumber: card.number,
+          cardExpire: card.expire,
         });
 
-        window.__paymeCard = created.card;
-
-        const verify = await paymeRpc('cards.get_verify_code', {
-          token: created.card.token,
-        });
-
-        if (!verify.sent) throw new Error('SMS kod yuborilmadi.');
+        if (!result.ok) throw new Error(result.message || 'SMS kod yuborilmadi.');
 
         cardForm.classList.add('hidden');
         otpForm.classList.remove('hidden');
         otp.focus();
-        const seconds = verify.wait ? Math.ceil(verify.wait / 1000) : null;
-        setMessage('SMS kod ' + (verify.phone || 'kartaga ulangan telefon raqamiga') + ' yuborildi.' + (seconds ? '\\nKod muddati: ' + seconds + ' soniya.' : ''));
+        const seconds = result.wait ? Math.ceil(result.wait / 1000) : null;
+        setMessage('SMS kod ' + (result.phone || 'kartaga ulangan telefon raqamiga') + ' yuborildi.' + (seconds ? '\\nKod muddati: ' + seconds + ' soniya.' : ''));
       } catch (error) {
         setMessage(error.message, 'error');
       } finally {
@@ -484,17 +546,11 @@ function renderPaymentPage() {
       setBusy(otpButton, true);
       setMessage('Hold bajarilmoqda...');
       try {
-        const verified = await paymeRpc('cards.verify', {
-          token: window.__paymeCard?.token,
-          code: otp.value,
-        });
-
         const result = await postJson(WEB_APP_API_URL, {
+          action: 'confirm',
           initData: tg.initData,
           submissionId,
-          cardToken: verified.card.token,
-          cardMask: verified.card.number,
-          cardExpire: verified.card.expire,
+          otp: otp.value,
         });
 
         if (!result.ok) throw new Error(result.message || 'Hold bajarilmadi.');
@@ -509,30 +565,6 @@ function renderPaymentPage() {
       } finally {
         setBusy(otpButton, false);
       }
-    }
-
-    async function paymeRpc(method, params) {
-      const response = await fetch(PAYME_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache',
-          'X-Auth': PAYME_MERCHANT_ID,
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: Date.now(),
-          method,
-          params,
-        }),
-      });
-
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload || payload.error) {
-        throw new Error(payload?.error?.message || 'Payme so\\'rovi bajarilmadi.');
-      }
-
-      return payload.result;
     }
 
     function parseCard() {
