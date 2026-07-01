@@ -43,6 +43,12 @@ export function startPaymentWebAppServer({ payme, notifyAdmin }) {
 async function routeRequest({ request, response, payme, notifyAdmin }) {
   const url = new URL(request.url, `http://${request.headers.host ?? 'localhost'}`);
 
+  console.log('web_app_request', {
+    method: request.method,
+    path: url.pathname,
+    query: url.search,
+  });
+
   if (request.method === 'GET' && url.pathname === config.webApp.path) {
     sendHtml(response, renderPaymentPage());
     return;
