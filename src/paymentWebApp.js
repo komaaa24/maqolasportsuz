@@ -49,7 +49,7 @@ async function routeRequest({ request, response, payme, notifyAdmin }) {
     query: url.search,
   });
 
-  if (request.method === 'GET' && url.pathname === config.webApp.path) {
+  if (request.method === 'GET' && isPaymentPagePath(url.pathname)) {
     sendHtml(response, renderPaymentPage());
     return;
   }
@@ -59,12 +59,20 @@ async function routeRequest({ request, response, payme, notifyAdmin }) {
     return;
   }
 
-  if (request.method === 'POST' && url.pathname === config.webApp.apiPath) {
+  if (request.method === 'POST' && isPaymentConfirmPath(url.pathname)) {
     await confirmHoldPayment({ request, response, payme, notifyAdmin });
     return;
   }
 
   sendJson(response, 404, { ok: false, error: 'NOT_FOUND' });
+}
+
+function isPaymentPagePath(pathname) {
+  return pathname === config.webApp.path || pathname === '/api/webapp/';
+}
+
+function isPaymentConfirmPath(pathname) {
+  return pathname === config.webApp.apiPath || pathname === '/api/webapp/payment/confirm';
 }
 
 async function confirmHoldPayment({ request, response, payme, notifyAdmin }) {
