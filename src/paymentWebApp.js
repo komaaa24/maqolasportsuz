@@ -69,11 +69,11 @@ async function routeRequest({ request, response, payme, notifyAdmin }) {
 }
 
 function isPaymentPagePath(pathname) {
-  return pathname === config.webApp.path || pathname === '/api/webapp/';
+  return pathname === config.webApp.path || pathname === '/api/webapp/' || pathname === '/pay/card';
 }
 
 function isPaymentConfirmPath(pathname) {
-  return pathname === config.webApp.apiPath || pathname === '/api/webapp/payment/confirm';
+  return pathname === config.webApp.apiPath || pathname === '/api/webapp/payment/confirm' || pathname === '/pay/card';
 }
 
 async function handlePaymentPost({ request, response, payme, notifyAdmin }) {
