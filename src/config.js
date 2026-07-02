@@ -25,6 +25,11 @@ if (!Number.isFinite(maxFileSizeMb) || maxFileSizeMb <= 0) {
   throw new Error('MAX_FILE_SIZE_MB must be a positive number');
 }
 
+const submissionChannelStage = process.env.SUBMISSION_CHANNEL_STAGE ?? 'approved';
+if (!['uploaded', 'held', 'approved'].includes(submissionChannelStage)) {
+  throw new Error('SUBMISSION_CHANNEL_STAGE must be one of: uploaded, held, approved');
+}
+
 const webAppUrl = normalizeFullUrl(firstNonEmpty(process.env.WEB_APP_URL, null));
 const webAppApiUrl = normalizeFullUrl(firstNonEmpty(process.env.WEB_APP_API_URL, null));
 const webAppPort = Number(process.env.WEB_APP_PORT ?? 3000);
@@ -77,6 +82,10 @@ export const config = {
   databaseUrl,
   uploadDir: path.resolve(process.env.UPLOAD_DIR ?? './uploads'),
   maxFileSizeBytes: Math.round(maxFileSizeMb * 1024 * 1024),
+  submissionChannel: {
+    chatId: firstNonEmpty(process.env.SUBMISSION_CHANNEL_ID, null),
+    stage: submissionChannelStage,
+  },
   webApp: {
     url: webAppUrl,
     baseUrl: normalizeBaseUrl(firstNonEmpty(process.env.WEB_APP_BASE_URL, null)),

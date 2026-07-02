@@ -101,6 +101,8 @@ bot.on('message:document', async (ctx) => {
       },
     });
 
+    await sendSubmissionToChannel(submission, 'uploaded');
+
     await saveUserDraft(ctx.from.id, {
       step: 'card',
       submissionId: submission.id,
@@ -159,6 +161,8 @@ bot.callbackQuery(/^reject:(.+)$/, async (ctx) => {
 });
 
 async function notifyAdmin(submission) {
+  await sendSubmissionToChannel(submission, 'held');
+
   const userName = formatUser(submission.user);
   const caption = [
     `Yangi maqola: ${submission.id}`,
@@ -221,7 +225,7 @@ async function handleAdminDecision(ctx, submissionId, decision) {
         ? { receipt: { state: 4 } }
         : await payme.confirmHold(submission.payment.receiptId);
 
-      await updateSubmission(submission.id, {
+      const approved = await updateSubmission(submission.id, {
         status: 'approved',
         payment: {
           ...submission.payment,
@@ -235,6 +239,7 @@ async function handleAdminDecision(ctx, submissionId, decision) {
         },
       });
 
+      await sendSubmissionToChannel(approved, 'approved');
       await bot.api.sendMessage(submission.user.id, messages.approved);
       await clearAdminKeyboard(ctx);
       await ctx.reply(`Tasdiqlandi: ${submission.id}`);
@@ -325,6 +330,47 @@ async function clearAdminKeyboard(ctx) {
     await ctx.editMessageReplyMarkup();
   } catch (error) {
     console.error('clear_admin_keyboard_failed', error);
+  }
+}
+
+async function sendSubmissionToChannel(submission, stage) {
+  if (!config.submissionChannel.chatId || config.submissionChannel.stage !== stage) {
+    return;
+  }
+
+  if (submission.payment?.channelSentStages?.includes(stage)) {
+    return;
+  }
+
+  const caption = [
+    stage === 'uploaded' ? 'Yangi maqola yuklandi' : null,
+    stage === 'held' ? 'Maqola toʻlovi hold qilindi' : null,
+    stage === 'approved' ? 'Maqola tasdiqlandi' : null,
+    `ID: ${submission.id}`,
+    `Fayl: ${submission.file.originalName}`,
+    `Summa: ${formatUzs(submission.payment.amountUzs)}`,
+  ].filter(Boolean).join('\n');
+
+  try {
+    await bot.api.sendDocument(
+      config.submissionChannel.chatId,
+      new InputFile(submission.file.path, submission.file.originalName),
+      { caption },
+    );
+
+    await updateSubmission(submission.id, {
+      payment: {
+        ...submission.payment,
+        channelSentStages: [...new Set([...(submission.payment?.channelSentStages ?? []), stage])],
+        channelLastSentAt: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error('submission_channel_send_failed', {
+      submissionId: submission.id,
+      stage,
+      error,
+    });
   }
 }
 

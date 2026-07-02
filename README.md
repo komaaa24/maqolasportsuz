@@ -7,12 +7,12 @@ grammY asosidagi Telegram bot foydalanuvchidan PDF yoki Word maqola qabul qiladi
 1. Foydalanuvchi `/start` bosadi va PDF/DOC/DOCX fayl yuboradi.
 2. Bot Telegram Web App to'lov oynasini ochadigan tugma yuboradi.
 3. Foydalanuvchi karta raqami va amal qilish muddatini Web App ichida kiritadi.
-4. Web App karta ma'lumotini Payme APIga to'g'ridan-to'g'ri yuborib token oladi.
-5. Web App `cards.create` orqali karta tokenini yaratadi.
-6. Web App `cards.get_verify_code` orqali SMS kod yuboradi.
+4. Web App karta ma'lumotini HTTPS orqali bot serveriga yuboradi.
+5. Bot serveri `cards.create` orqali karta tokenini yaratadi.
+6. Bot serveri `cards.get_verify_code` orqali SMS kod yuboradi.
 7. Foydalanuvchi SMS kodni Web App ichida kiritadi.
-8. Web App `cards.verify` orqali kartani tasdiqlaydi.
-9. Bot serveri Web App `initData` imzosini tekshiradi va faqat Payme karta tokenini qabul qiladi.
+8. Bot serveri `cards.verify` orqali kartani tasdiqlaydi.
+9. Bot serveri Web App `initData` imzosini tekshiradi.
 10. Bot `receipts.create` metodini `hold: true` bilan chaqiradi.
 11. Bot `receipts.pay` metodini karta tokeni va `hold: true` bilan chaqiradi.
 12. Payme `state: 5` qaytarsa, pul hold qilingan bo'ladi va maqola adminga yuboriladi.
@@ -45,6 +45,19 @@ Bot Payme `receipts.create` account qismiga aynan shuni yuboradi:
 
 `user_id` avtomatik Telegram foydalanuvchi ID dan olinadi. `plan_id` esa `.env` ichidagi `PAYME_PLAN_ID` dan olinadi.
 
+Maqolalarni avtomatik Telegram kanalga yuborish uchun botni kanalga admin qiling va `.env`ga kanal ID yozing:
+
+```env
+SUBMISSION_CHANNEL_ID=@your_channel_username
+SUBMISSION_CHANNEL_STAGE=approved
+```
+
+`SUBMISSION_CHANNEL_STAGE` qiymatlari:
+
+- `uploaded`: fayl qabul qilingan zahoti yuboradi.
+- `held`: Payme pulni hold qilgandan keyin yuboradi.
+- `approved`: admin tasdiqlagandan keyin yuboradi.
+
 PostgreSQL ulanishi ham kerak:
 
 ```env
@@ -74,7 +87,7 @@ https://programmsoft.uz/sports_pay.php -> http://127.0.0.1:9001/sports_pay.php
 - Bu versiya Payme Subscribe API `hold` dokumentatsiyasiga moslangan.
 - `receipts.create` va `receipts.pay` metodlarida `hold: true` yuboriladi.
 - `receipts.create` account maydonida Payme Business rekvizitlariga mos `user_id` va `plan_id` yuboriladi.
-- Karta raqami Telegram chatiga yuborilmaydi va bot serveriga POST qilinmaydi; Web App uni Payme APIga yuborib token oladi.
+- Karta raqami Telegram chatiga yuborilmaydi va bazaga saqlanmaydi; bot serveri uni faqat Payme `cards.create` chaqiruvi uchun ishlatadi.
 - Admin tasdiqlasa `receipts.confirm_hold`, rad etsa `receipts.cancel` chaqiriladi.
 - Hold ishlashi uchun Payme Business texnik mutaxassisi kassada hold funksiyasini yoqib berishi kerak.
 - Payme hujjatiga ko'ra holdni test qilish faqat real rejimda bo'lishi mumkin.
@@ -83,7 +96,7 @@ https://programmsoft.uz/sports_pay.php -> http://127.0.0.1:9001/sports_pay.php
 
 ## Xavfsizlik
 
-- Bot karta raqamini qabul qilmaydi va saqlamaydi. Karta raqami Web App brauzeridan Payme `cards.create` chaqiruviga ketadi. Bot serveriga faqat tasdiqlangan Payme karta tokeni yuboriladi.
+- Bot karta raqamini bazaga saqlamaydi. Karta raqami Web App orqali HTTPS bilan keladi va faqat Payme `cards.create` chaqiruvi uchun ishlatiladi.
 - Web App API Telegram `initData` HMAC imzosini tekshiradi va foydalanuvchi faqat o'z submissioni uchun to'lov boshlashi mumkin.
 - Maqola metadata, Telegram user ID, Payme receipt ID, karta maskasi va buyurtma holati PostgreSQL bazasida saqlanadi.
 - Maqola fayllari `UPLOAD_DIR/submissions` papkasida saqlanadi.
