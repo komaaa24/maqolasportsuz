@@ -334,11 +334,31 @@ async function clearAdminKeyboard(ctx) {
 }
 
 async function sendSubmissionToChannel(submission, stage) {
-  if (!config.submissionChannel.chatId || config.submissionChannel.stage !== stage) {
+  if (!config.submissionChannel.chatId) {
+    console.warn('submission_channel_skipped', {
+      reason: 'missing_chat_id',
+      submissionId: submission.id,
+      stage,
+    });
+    return;
+  }
+
+  if (config.submissionChannel.stage !== stage) {
+    console.warn('submission_channel_skipped', {
+      reason: 'stage_mismatch',
+      submissionId: submission.id,
+      configuredStage: config.submissionChannel.stage,
+      attemptedStage: stage,
+    });
     return;
   }
 
   if (submission.payment?.channelSentStages?.includes(stage)) {
+    console.warn('submission_channel_skipped', {
+      reason: 'already_sent',
+      submissionId: submission.id,
+      stage,
+    });
     return;
   }
 
@@ -369,9 +389,21 @@ async function sendSubmissionToChannel(submission, stage) {
     console.error('submission_channel_send_failed', {
       submissionId: submission.id,
       stage,
-      error,
+      chatId: config.submissionChannel.chatId,
+      error: serializeError(error),
     });
   }
+}
+
+function serializeError(error) {
+  return {
+    name: error?.name,
+    message: error?.message,
+    description: error?.description,
+    errorCode: error?.error_code,
+    method: error?.method,
+    payload: error?.payload,
+  };
 }
 
 await initStorage();
