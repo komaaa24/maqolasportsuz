@@ -1,6 +1,28 @@
 <?php
 declare(strict_types=1);
 
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
+header('Access-Control-Max-Age: 86400');
+header('Cache-Control: no-store');
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'ok' => false,
+        'error' => 'METHOD_NOT_ALLOWED',
+        'message' => 'Faqat POST soʻrov qabul qilinadi.',
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $target = 'http://127.0.0.1:9001/sports_pay.php';
 $body = file_get_contents('php://input');
 
@@ -23,7 +45,6 @@ curl_close($ch);
 
 http_response_code($status);
 header('Content-Type: application/json; charset=utf-8');
-header('Cache-Control: no-store');
 
 if ($response === false) {
     echo json_encode([

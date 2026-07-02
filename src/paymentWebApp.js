@@ -578,12 +578,29 @@ function renderPaymentPage() {
     }
 
     async function postJson(url, payload) {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      return response.json();
+      let response;
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        throw new Error('Toʻlov serveriga ulanib boʻlmadi. Internet yoki server sozlamasini tekshiring.');
+      }
+
+      let result;
+      try {
+        result = await response.json();
+      } catch {
+        throw new Error('Toʻlov serveridan notoʻgʻri javob qaytdi.');
+      }
+
+      if (!response.ok && result?.message) {
+        throw new Error(result.message);
+      }
+
+      return result;
     }
 
     function setBusy(button, busy) {
