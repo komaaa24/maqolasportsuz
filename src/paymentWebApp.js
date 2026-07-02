@@ -261,12 +261,27 @@ async function readJsonBody(request) {
 }
 
 function getPaymeErrorMessage(error) {
+  if (isTlsCertificateError(error)) {
+    return 'Payme bilan SSL sertifikat tekshiruvida xatolik. Serverdagi CA sertifikatlarni yangilang.';
+  }
+
   const message = error?.details?.message ?? error?.message;
   if (typeof message === 'string' && message.trim()) {
     return message;
   }
 
   return messages.paymentError;
+}
+
+function isTlsCertificateError(error) {
+  const codes = new Set([
+    'SELF_SIGNED_CERT_IN_CHAIN',
+    'DEPTH_ZERO_SELF_SIGNED_CERT',
+    'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+    'CERT_HAS_EXPIRED',
+  ]);
+
+  return codes.has(error?.code) || codes.has(error?.cause?.code);
 }
 
 function normalizeNullableString(value) {
