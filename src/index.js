@@ -260,7 +260,7 @@ async function handleAdminDecision(ctx, submissionId, decision) {
 
     const result = await payme.cancelReceipt(submission.payment.receiptId);
 
-    await updateSubmission(submission.id, {
+    const rejected = await updateSubmission(submission.id, {
       status: 'rejected',
       payment: {
         ...submission.payment,
@@ -274,6 +274,7 @@ async function handleAdminDecision(ctx, submissionId, decision) {
       },
     });
 
+    await sendSubmissionToChannel(rejected, 'rejected');
     await bot.api.sendMessage(submission.user.id, messages.rejected);
     await clearAdminKeyboard(ctx);
     await ctx.reply(`Rad etildi va hold bekor qilindi: ${submission.id}`);
@@ -325,6 +326,37 @@ function statusLabel(status) {
   return labels[status] ?? status;
 }
 
+function channelStatusLabel(submission) {
+  if (submission.status === 'approved') {
+    return 'Tasdiqlandi';
+  }
+
+  if (submission.status === 'rejected') {
+    return 'Rad etildi';
+  }
+
+  if (submission.status === 'pending_review') {
+    return 'Admin ko‘rib chiqmoqda';
+  }
+
+  if (submission.status === 'awaiting_otp') {
+    return 'SMS kod kutilmoqda';
+  }
+
+  return 'Toʻlov kutilmoqda';
+}
+
+function formatDateTime(value) {
+  return new Intl.DateTimeFormat('uz-UZ', {
+    timeZone: 'Asia/Tashkent',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
 async function clearAdminKeyboard(ctx) {
   try {
     await ctx.editMessageReplyMarkup();
@@ -343,36 +375,33 @@ async function sendSubmissionToChannel(submission, stage) {
     return;
   }
 
-  if (config.submissionChannel.stage !== stage) {
-    console.warn('submission_channel_skipped', {
-      reason: 'stage_mismatch',
-      submissionId: submission.id,
-      configuredStage: config.submissionChannel.stage,
-      attemptedStage: stage,
-    });
+  if (!shouldSendOrUpdateChannelPost(submission, stage)) {
     return;
   }
 
-  if (submission.payment?.channelSentStages?.includes(stage)) {
-    console.warn('submission_channel_skipped', {
-      reason: 'already_sent',
-      submissionId: submission.id,
-      stage,
-    });
-    return;
-  }
-
-  const caption = [
-    stage === 'uploaded' ? 'Yangi maqola yuklandi' : null,
-    stage === 'held' ? 'Maqola toʻlovi hold qilindi' : null,
-    stage === 'approved' ? 'Maqola tasdiqlandi' : null,
-    `ID: ${submission.id}`,
-    `Fayl: ${submission.file.originalName}`,
-    `Summa: ${formatUzs(submission.payment.amountUzs)}`,
-  ].filter(Boolean).join('\n');
+  const caption = buildChannelCaption(submission, stage);
+  const channelMessageId = submission.payment?.channelMessageId;
 
   try {
-    await bot.api.sendDocument(
+    if (channelMessageId) {
+      await bot.api.editMessageCaption(
+        config.submissionChannel.chatId,
+        channelMessageId,
+        { caption },
+      );
+
+      await updateSubmission(submission.id, {
+        payment: {
+          ...submission.payment,
+          channelLastStage: stage,
+          channelLastStatus: submission.status,
+          channelLastUpdatedAt: new Date().toISOString(),
+        },
+      });
+      return;
+    }
+
+    const message = await bot.api.sendDocument(
       config.submissionChannel.chatId,
       new InputFile(submission.file.path, submission.file.originalName),
       { caption },
@@ -381,7 +410,11 @@ async function sendSubmissionToChannel(submission, stage) {
     await updateSubmission(submission.id, {
       payment: {
         ...submission.payment,
+        channelChatId: config.submissionChannel.chatId,
+        channelMessageId: message.message_id,
         channelSentStages: [...new Set([...(submission.payment?.channelSentStages ?? []), stage])],
+        channelLastStage: stage,
+        channelLastStatus: submission.status,
         channelLastSentAt: new Date().toISOString(),
       },
     });
@@ -390,9 +423,43 @@ async function sendSubmissionToChannel(submission, stage) {
       submissionId: submission.id,
       stage,
       chatId: config.submissionChannel.chatId,
+      channelMessageId,
       error: serializeError(error),
     });
   }
+}
+
+function shouldSendOrUpdateChannelPost(submission, stage) {
+  if (submission.payment?.channelMessageId) {
+    return true;
+  }
+
+  if (config.submissionChannel.stage !== stage) {
+    console.warn('submission_channel_skipped', {
+      reason: 'stage_mismatch',
+      submissionId: submission.id,
+      configuredStage: config.submissionChannel.stage,
+      attemptedStage: stage,
+    });
+    return false;
+  }
+
+  return true;
+}
+
+function buildChannelCaption(submission, stage) {
+  return [
+    stage === 'uploaded' ? 'Yangi maqola yuklandi' : null,
+    stage === 'held' ? 'Maqola toʻlovi hold qilindi' : null,
+    stage === 'approved' ? 'Maqola tasdiqlandi' : null,
+    stage === 'rejected' ? 'Maqola rad etildi' : null,
+    `ID: ${submission.id}`,
+    `Kelgan sana: ${formatDateTime(submission.createdAt)}`,
+    `Status: ${channelStatusLabel(submission)}`,
+    `Fayl: ${submission.file.originalName}`,
+    `Summa: ${formatUzs(submission.payment.amountUzs)}`,
+    submission.admin?.decidedAt ? `Qaror sanasi: ${formatDateTime(submission.admin.decidedAt)}` : null,
+  ].filter(Boolean).join('\n');
 }
 
 function serializeError(error) {
